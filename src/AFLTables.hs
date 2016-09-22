@@ -13,6 +13,7 @@ where
 import           Control.Applicative
 import           Control.Monad
 import qualified Data.ByteString.Char8    as B
+import qualified Data.ByteString.Lazy    as BL
 import           Data.Csv
 import           Data.List
 import           Data.List.Split          (wordsBy)
@@ -76,7 +77,7 @@ readScoreLine xs = case head xs of
    readScoreLine' align (description:t':_) =
       let t = readTime t'
       in
-        if description == "Rushed Behind"
+        if "Rushed" `isInfixOf` description 
           then (align, t, RushedBehind, Nothing)
           else case reverse . words $ description of
                 "behind":name -> (align, t, Behind, Just $ unwords name)
@@ -105,7 +106,7 @@ matchInfoArr = (css "table:first-child" >>>
                     venue <- (!! 3) -< l
                     date <- (!! 5) -< l
                     attendance <- (!! 7) -< l
-                    returnA -< (rnd, venue, (readDate date), (read attendance))
+                    returnA -< (trim rnd, venue, (readDate date), (read attendance))
 
 scoreLinesArr = (css "table:nth-child(8)"
                   >>> css "tr"
@@ -181,6 +182,7 @@ readScoreEventsFromFile html = do
   fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
     >>> scoreEventsArr matchid
 
-html2csv html = do
+html2csv html csvOut = do
   events <- readScoreEventsFromFile html
-  return $ encodeDefaultOrderedByName events
+  BL.writeFile csvOut (encodeDefaultOrderedByName events)
+  
