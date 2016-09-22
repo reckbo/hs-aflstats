@@ -1,4 +1,5 @@
 {-# LANGUAGE Arrows            #-}
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TupleSections     #-}
@@ -11,12 +12,15 @@ where
 
 import           Control.Applicative
 import           Control.Monad
+import qualified Data.ByteString.Char8    as B
+import           Data.Csv
 import           Data.List
-import           Data.List.Split
+import           Data.List.Split          (wordsBy)
 import           Data.Maybe
 import           Data.Time                (LocalTime, defaultTimeLocale,
                                            parseTimeM)
 import           Data.Tree.NTree.TypeDefs
+import           GHC.Generics
 import           System.FilePath
 import           Text.HandsomeSoup
 import           Text.XML.HXT.Core
@@ -32,28 +36,9 @@ data ScoreType = Goal | Behind | RushedBehind
 
 type TeamEvent = (Team, Alignment)
 
-data MatchInfo = MatchInfo
-  { eventid    :: Int
-  , round      :: Int
-  , venue      :: String
-  , date       :: LocalTime
-  , attendance :: Int
-  } deriving Show
-
 type Player = String
 type Team = String
 type Time = Int
-
--- data ScoreEvent' = ScoreEvent'
---   { _alignment'  :: Alignment
---   , _time'      :: Time
---   , _scoreType' :: ScoreType
---   , _scorer'    :: Maybe Player
---   }
---   deriving Show
-
--- data Quarter = Quarter Int Time
---   deriving Show
 
 data ScoreEvent = ScoreEvent
   { _eventid     :: Int
@@ -69,14 +54,16 @@ data ScoreEvent = ScoreEvent
   , _scoreType   :: ScoreType
   , _scorer      :: Maybe Player
   }
-  deriving Show
+  deriving (Show, Generic)
 
--- join :: Int -> Teams -> Quarter -> ScoreEvent' -> ScoreEvent
--- join matchid (Teams home away) (Quarter qnum qtime) ScoreEvent'{..}
---   = ScoreEvent matchid qnum qtime team _alignment' _time' _scoreType' _scorer'
---     where team = case _alignment' of
---             Home -> home
---             Away -> away
+instance ToField LocalTime where
+  toField x =  B.pack $ show x
+instance ToField ScoreType where
+  toField x =  B.pack $ show x
+instance ToField Alignment where
+  toField x =  B.pack $ show x
+instance ToNamedRecord ScoreEvent
+instance DefaultOrdered ScoreEvent
 
 trim :: String -> String
 trim = unwords . words
@@ -96,7 +83,6 @@ readScoreLine xs = case head xs of
                 "goal":name -> (align, t, Goal, Just $ unwords name)
                 _ -> error $ "Unexpected goal type in: " ++ description
    readScoreLine' _ xs = error $ "couldnt parse " ++ (unwords xs)
-
 
 readDate :: String -> LocalTime
 readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
@@ -150,11 +136,6 @@ readQuarterTime = readTime . striphead . striptail
     striphead = tail . dropWhile (/='(')
     striptail = reverse. tail . dropWhile (/=')') . reverse
 
--- getMatchInfo matchid html = do
---   let doc = readString [withParseHTML yes, withWarnings no] html
---   [round, venue, date, attendance] <- fmap head $ runX $ doc >>> matchInfoArr
---   return $ MatchInfo matchid (read round) venue (readDate date) (read attendance)
-
 type MatchEvent = (Round, Venue, LocalTime, Attendance)
 type QuarterEvent = (Int, Time)
 
@@ -199,3 +180,7 @@ readScoreEventsFromFile html = do
   let matchid = read $ takeBaseName html
   fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
     >>> scoreEventsArr matchid
+
+html2csv html = do
+  events <- readScoreEventsFromFile html
+  return $ encodeDefaultOrderedByName events
