@@ -1,28 +1,26 @@
-{-# LANGUAGE Arrows            #-}
-{-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE Arrows        #-}
+{-# LANGUAGE TupleSections #-}
 
-module AFLTables
-  -- ( getScoreEvents
-  -- , readScoreEventsFromFile
-  -- , readMatchInfoFromFile
-  -- )
+module AFLTables.MatchStats
+  ( readScoreEventsFromFile
+  , html2csv
+  )
 where
 
+import           AFLTables.Types
 import           Control.Applicative
 import           Control.Monad
-import qualified Data.ByteString.Char8    as B
-import qualified Data.ByteString.Lazy    as BL
-import           Data.Csv (encodeDefaultOrderedByName) 
-import           Data.List (isInfixOf)
+import qualified Data.ByteString.Lazy     as BL (writeFile)
+import           Data.Csv                 (encodeDefaultOrderedByName)
+import           Data.List                (isInfixOf)
 import           Data.List.Split          (wordsBy)
-import           Data.Maybe (fromJust)
+import           Data.Maybe               (fromJust)
 import           Data.Time                (LocalTime, defaultTimeLocale,
                                            parseTimeM)
 import           Data.Tree.NTree.TypeDefs
-import           System.FilePath (takeBaseName)
-import           Text.HandsomeSoup
+import           System.FilePath          (takeBaseName)
+import           Text.HandsomeSoup        (css)
 import           Text.XML.HXT.Core
-import AFLTables.Types
 
 trim :: String -> String
 trim = unwords . words
