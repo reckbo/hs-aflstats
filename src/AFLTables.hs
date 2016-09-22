@@ -1,8 +1,6 @@
 {-# LANGUAGE Arrows            #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TupleSections     #-}
+
 module AFLTables
   -- ( getScoreEvents
   -- , readScoreEventsFromFile
@@ -14,57 +12,17 @@ import           Control.Applicative
 import           Control.Monad
 import qualified Data.ByteString.Char8    as B
 import qualified Data.ByteString.Lazy    as BL
-import           Data.Csv
-import           Data.List
+import           Data.Csv (encodeDefaultOrderedByName) 
+import           Data.List (isInfixOf)
 import           Data.List.Split          (wordsBy)
-import           Data.Maybe
+import           Data.Maybe (fromJust)
 import           Data.Time                (LocalTime, defaultTimeLocale,
                                            parseTimeM)
 import           Data.Tree.NTree.TypeDefs
-import           GHC.Generics
-import           System.FilePath
+import           System.FilePath (takeBaseName)
 import           Text.HandsomeSoup
 import           Text.XML.HXT.Core
-
-data Alignment = Home | Away
-  deriving (Show,Eq)
-
-data EventOutcome = Won | Lost | Drawn
-  deriving Show
-
-data ScoreType = Goal | Behind | RushedBehind
-  deriving Show
-
-type TeamEvent = (Team, Alignment)
-
-type Player = String
-type Team = String
-type Time = Int
-
-data ScoreEvent = ScoreEvent
-  { _eventid     :: Int
-  , _round       :: String
-  , _venue       :: String
-  , _date        :: LocalTime
-  , _attendance  :: Int
-  , _quarter     :: Int
-  , _quarterTime :: Int
-  , _team        :: String
-  , _alignment   :: Alignment
-  , _time        :: Time
-  , _scoreType   :: ScoreType
-  , _scorer      :: Maybe Player
-  }
-  deriving (Show, Generic)
-
-instance ToField LocalTime where
-  toField x =  B.pack $ show x
-instance ToField ScoreType where
-  toField x =  B.pack $ show x
-instance ToField Alignment where
-  toField x =  B.pack $ show x
-instance ToNamedRecord ScoreEvent
-instance DefaultOrdered ScoreEvent
+import AFLTables.Types
 
 trim :: String -> String
 trim = unwords . words
@@ -77,7 +35,7 @@ readScoreLine xs = case head xs of
    readScoreLine' align (description:t':_) =
       let t = readTime t'
       in
-        if "Rushed" `isInfixOf` description 
+        if "Rushed" `isInfixOf` description
           then (align, t, RushedBehind, Nothing)
           else case reverse . words $ description of
                 "behind":name -> (align, t, Behind, Just $ unwords name)
@@ -90,10 +48,6 @@ readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
   where
     t' = trim $ takeWhile (/='(') t
     fmt = "%a, %e-%b-%Y %l:%M %p"
-
-type Round = String
-type Venue = String
-type Attendance = Int
 
 matchInfoArr :: IOSLA (XIOState ()) (NTree XNode) (Round, Venue, LocalTime, Attendance)
 matchInfoArr = (css "table:first-child" >>>
@@ -185,4 +139,3 @@ readScoreEventsFromFile html = do
 html2csv html csvOut = do
   events <- readScoreEventsFromFile html
   BL.writeFile csvOut (encodeDefaultOrderedByName events)
-  
