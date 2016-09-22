@@ -1,7 +1,7 @@
 {-# LANGUAGE Arrows            #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections     #-}
 module AFLTables
   -- ( getScoreEvents
   -- , readScoreEventsFromFile
@@ -10,7 +10,7 @@ module AFLTables
 where
 
 import           Control.Applicative
-import Control.Monad
+import           Control.Monad
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
@@ -57,6 +57,10 @@ type Time = Int
 
 data ScoreEvent = ScoreEvent
   { _eventid     :: Int
+  , _round       :: String
+  , _venue       :: String
+  , _date        :: LocalTime
+  , _attendance  :: Int
   , _quarter     :: Int
   , _quarterTime :: Int
   , _team        :: String
@@ -98,17 +102,24 @@ readDate :: String -> LocalTime
 readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
   where
     t' = trim $ takeWhile (/='(') t
-    trim = unwords . words
     fmt = "%a, %e-%b-%Y %l:%M %p"
 
-matchInfoArr :: IOSLA (XIOState ()) (NTree XNode) [String]
+type Round = String
+type Venue = String
+type Attendance = Int
+
+matchInfoArr :: IOSLA (XIOState ()) (NTree XNode) (Round, Venue, LocalTime, Attendance)
 matchInfoArr = (css "table:first-child" >>>
                 css "tr:first-child" >>>
                 css "td:nth-child(2)" >>>
                removeAllWhiteSpace >>>
                 (deep getText))
-               >. (fmap trim . getElems [1,3,5,7])
-  where getElems is xs = map (xs !!) is
+               >. proc l -> do
+                    rnd <- (!! 1) -< l
+                    venue <- (!! 3) -< l
+                    date <- (!! 5) -< l
+                    attendance <- (!! 7) -< l
+                    returnA -< (rnd, venue, (readDate date), (read attendance))
 
 scoreLinesArr = (css "table:nth-child(8)"
                   >>> css "tr"
@@ -139,18 +150,31 @@ readQuarterTime = readTime . striphead . striptail
     striphead = tail . dropWhile (/='(')
     striptail = reverse. tail . dropWhile (/=')') . reverse
 
-getMatchInfo matchid html = do
-  let doc = readString [withParseHTML yes, withWarnings no] html
-  [round, venue, date, attendance] <- fmap head $ runX $ doc >>> matchInfoArr
-  return $ MatchInfo matchid (read round) venue (readDate date) (read attendance)
+-- getMatchInfo matchid html = do
+--   let doc = readString [withParseHTML yes, withWarnings no] html
+--   [round, venue, date, attendance] <- fmap head $ runX $ doc >>> matchInfoArr
+--   return $ MatchInfo matchid (read round) venue (readDate date) (read attendance)
 
-joinEvents :: Int -> [(Team, Alignment)] -> [(Int, Time)] -> [(Alignment, Time, ScoreType, Maybe Player)] -> [ScoreEvent]
-joinEvents eventid teamEvents quarterEvent scoreEvents = do
+type MatchEvent = (Round, Venue, LocalTime, Attendance)
+type QuarterEvent = (Int, Time)
+
+joinEvents :: Int ->
+              [MatchEvent] ->
+              [TeamEvent] ->
+              [QuarterEvent] ->
+              [(Alignment, Time, ScoreType, Maybe Player)] ->
+              [ScoreEvent]
+joinEvents eventid matchEvent teamEvents quarterEvent scoreEvents = do
+  (rnd, venue, date, attendance) <- matchEvent -- expect a one element list
   (team, teamAlign) <- teamEvents
   (qid, quarterTime) <- quarterEvent -- expect a one element list
   (scoreAlign, scoreTime, scoreType, player) <- scoreEvents
   guard $ teamAlign == scoreAlign
   return ScoreEvent { _eventid = eventid
+                    , _round = rnd
+                    , _venue = venue
+                    , _date = date
+                    , _attendance = attendance
                     , _quarter = qid
                     , _quarterTime = quarterTime
                     , _team        = team
@@ -160,17 +184,18 @@ joinEvents eventid teamEvents quarterEvent scoreEvents = do
                     , _scorer      = player
                     }
 
-scoreEventsArr matchid = proc html -> do
+scoreEventsArr eventid = proc html -> do
+  matchEvent <- listA matchInfoArr -< html
   teamEvents <- teamsArr -< html
   scoreLines' <- listA scoreLinesArr -< html
   let
     isQuarterLine = and . map ("quarter" `isInfixOf`)
     scoreEvents' =  fmap readScoreLine <$> wordsBy isQuarterLine scoreLines'
     quarterEvents = map (:[]) $ zip [1::Int ..] $ map readQuarterTime $ concat . filter isQuarterLine $ scoreLines'
-    scoreEvents = concat $ zipWith (joinEvents matchid teamEvents) quarterEvents scoreEvents'
+    scoreEvents = concat $ zipWith (joinEvents eventid matchEvent teamEvents) quarterEvents scoreEvents'
   returnA -< scoreEvents
 
 readScoreEventsFromFile html = do
   let matchid = read $ takeBaseName html
   fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
-    >>> scoreEventsArr matchid 
+    >>> scoreEventsArr matchid
