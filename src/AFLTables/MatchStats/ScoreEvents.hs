@@ -25,7 +25,7 @@ import           Text.XML.HXT.Core
 trim :: String -> String
 trim = unwords . words
 
-readScoreLine :: [String] -> (Alignment, Time, ScoreType, Maybe Player)
+readScoreLine :: [String] -> ScoreEvent'
 readScoreLine xs = case head xs of
   "\160" -> readScoreLine' Away $ reverse xs
   _ ->  readScoreLine' Home $ xs
