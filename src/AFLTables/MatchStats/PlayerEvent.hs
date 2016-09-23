@@ -1,36 +1,73 @@
 {-# LANGUAGE Arrows #-}
+{-# LANGUAGE DeriveGeneric     #-}
 module AFLTables.MatchStats.PlayerEvent
   where
 
+import           GHC.Generics
 import           Data.Char
 import           Text.HandsomeSoup (css)
 import           Text.XML.HXT.Core
+import           Data.Tree.NTree.TypeDefs
+import Text.Printf
+import AFLTables.MatchStats.Types (Alignment (..), Team (..))
+import qualified Data.ByteString.Lazy     as BL (writeFile)
+import           Data.Csv (ToField (..), ToNamedRecord, DefaultOrdered, encodeDefaultOrderedByName)
+import           System.FilePath          (takeBaseName)
 
--- homePlayersAr :: IOSLA (XIOState ()) (NTree XNode) (Round, Venue, LocalTime, Attendance)
-homePlayersArr
-  = (css "table:nth-child(3)"
-  >>> css "tr"
-  >>> listA (css "td" //> getText))
-  >>. drop 3 . reverse . drop 3 . reverse
-  >>. map readStatsLine
-
-data PlayerStats = PlayerStats
-  { jumper :: Int
+data PlayerEvent = PlayerEvent
+  { eventid :: Int
+  , team :: Team
+  , jumper :: Int
   , player :: String
   , ki,mk,hb,di,gl,bh,ho,k,r,i50,cl,cg,ff,fa,br,cp,up,cm,mi,onePct,bo,ga,pctp :: Maybe Int
-  } deriving Show
+  } deriving (Show, Generic)
 
--- #|Player|KI|MK|H|DI|GL|H|HO|K|R|IF|CL|CG|FF|F|R|CP|UP|CM|MI|1%|O|G|%P
-readStatsLine :: [String] -> Either String PlayerStats
-readStatsLine (jumper:player:xs) = case map toMaybeInt xs of
+instance ToNamedRecord PlayerEvent
+instance DefaultOrdered PlayerEvent
+
+tableArr align = let x = if align == Home then 3 else 5 :: Int
+                 in css (printf "table:nth-child(%d)" x)
+
+teamArr align = tableArr align
+                >>> css "thead"
+                >>> css "tr:first-child"
+                >>> deep getText
+                >. head
+                >>> arr (unwords . takeWhile (/= "Match") . words)
+
+linesArr :: Alignment -> IOSLA (XIOState ()) (NTree XNode) [String]
+linesArr align = (tableArr align
+                  >>> css "tr"
+                  >>> listA (css "td" //> getText))
+                 >>. drop 2 . reverse . drop 3 . reverse
+
+playerEventsArr' eventid align = proc html -> do
+  team <- teamArr align -< html
+  lines <- linesArr align -< html
+  returnA -< (readStatsLine eventid team) lines
+
+playerEventsArr eventid = proc html -> do
+  players <- listA $ playerEventsArr' eventid Home -< html
+  players' <- listA $ playerEventsArr' eventid Away -< html
+  returnA -< (players ++ players')
+
+readStatsLine :: Int -> Team -> [String] -> Either String PlayerEvent
+readStatsLine eventid team (jumper:player:xs) = case map toMaybeInt xs of
   (ki:mk:hb:di:gl:bh:ho:k:r:i50:cl:cg:ff:fa:br:cp:up:cm:mi:onePct:bo:ga:pctp:[]) ->
-    Right $ PlayerStats (read . head . words $ jumper) player ki mk hb di gl bh ho k r i50 cl cg ff fa br cp up cm mi onePct bo ga pctp
+    Right $ PlayerEvent eventid team (read . head . words $ jumper) player ki mk hb di gl bh ho k r i50 cl cg ff fa br cp up cm mi onePct bo ga pctp
   _ -> Left $ "Wrong number of elements: " ++ (show . length $ xs)
   where
     toMaybeInt x | and . map isDigit $ x = Just (read x)
                  | otherwise = Nothing
-readStatsLine _ = Left "stats line less than 3 elements long"
+readStatsLine _ _ _ = Left "stats line less than 3 elements long"
 
+readPlayerEventsFromFile html = do
+  let eventid = read $ takeBaseName html
+  fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
+    >>> playerEventsArr eventid
 
-
-main = runX $ readDocument [withParseHTML yes, withRemoveWS yes] "123.html" >>> homePlayersArr
+html2csv html csvOut = do
+  events <- readPlayerEventsFromFile html
+  case sequenceA events of
+    Left errMsg -> putStrLn errMsg
+    Right events' -> BL.writeFile csvOut (encodeDefaultOrderedByName events')
