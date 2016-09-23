@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveGeneric     #-}
-module AFLTables.Types where
+module AFLTables.MatchStats.Types where
 
 import           GHC.Generics
 import           Data.Csv (ToField (..), ToNamedRecord, DefaultOrdered)

@@ -1,13 +1,13 @@
 {-# LANGUAGE Arrows        #-}
 {-# LANGUAGE TupleSections #-}
 
-module AFLTables.MatchStats
+module AFLTables.MatchStats.ScoreEvents
   ( readScoreEventsFromFile
   , html2csv
   )
 where
 
-import           AFLTables.Types
+import           AFLTables.MatchStats.Types
 import           Control.Applicative
 import           Control.Monad
 import qualified Data.ByteString.Lazy     as BL (writeFile)
