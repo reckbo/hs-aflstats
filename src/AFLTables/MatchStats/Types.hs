@@ -12,7 +12,10 @@ data Alignment = Home | Away
 data ScoreType = Goal | Behind | RushedBehind
   deriving Show
 
+type MatchEvent = (Int, Round, Venue, LocalTime, Attendance)
 type TeamEvent = (Team, Alignment)
+type QuarterEvent = (Int, Time)
+type ScoreEvent' = (Alignment, Time, ScoreType, Maybe Player)
 
 type Player = String
 type Team = String

@@ -47,18 +47,18 @@ readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
     t' = trim $ takeWhile (/='(') t
     fmt = "%a, %e-%b-%Y %l:%M %p"
 
-matchInfoArr :: IOSLA (XIOState ()) (NTree XNode) (Round, Venue, LocalTime, Attendance)
-matchInfoArr = (css "table:first-child" >>>
-                css "tr:first-child" >>>
-                css "td:nth-child(2)" >>>
-               removeAllWhiteSpace >>>
-                (deep getText))
-               >. proc l -> do
-                    rnd <- (!! 1) -< l
-                    venue <- (!! 3) -< l
-                    date <- (!! 5) -< l
-                    attendance <- (!! 7) -< l
-                    returnA -< (trim rnd, venue, (readDate date), (read attendance))
+matchInfoArr :: Int -> IOSLA (XIOState ()) (NTree XNode) MatchEvent
+matchInfoArr eventid = (css "table:first-child" >>>
+                        css "tr:first-child" >>>
+                        css "td:nth-child(2)" >>>
+                        removeAllWhiteSpace >>>
+                        (deep getText))
+                       >. proc l -> do
+                          rnd <- (!! 1) -< l
+                          venue <- (!! 3) -< l
+                          date <- (!! 5) -< l
+                          attendance <- (!! 7) -< l
+                          returnA -< (eventid, trim rnd, venue, (readDate date), (read attendance))
 
 scoreLinesArr = (css "table:nth-child(8)"
                   >>> css "tr"
@@ -89,17 +89,13 @@ readQuarterTime = readTime . striphead . striptail
     striphead = tail . dropWhile (/='(')
     striptail = reverse. tail . dropWhile (/=')') . reverse
 
-type MatchEvent = (Round, Venue, LocalTime, Attendance)
-type QuarterEvent = (Int, Time)
-
-joinEvents :: Int ->
-              [MatchEvent] ->
+joinEvents :: [MatchEvent] ->
               [TeamEvent] ->
               [QuarterEvent] ->
-              [(Alignment, Time, ScoreType, Maybe Player)] ->
+              [ScoreEvent'] ->
               [ScoreEvent]
-joinEvents eventid matchEvent teamEvents quarterEvent scoreEvents = do
-  (rnd, venue, date, attendance) <- matchEvent -- expect a one element list
+joinEvents matchEvent teamEvents quarterEvent scoreEvents = do
+  (eventid, rnd, venue, date, attendance) <- matchEvent -- expect a one element list
   (team, teamAlign) <- teamEvents
   (qid, quarterTime) <- quarterEvent -- expect a one element list
   (scoreAlign, scoreTime, scoreType, player) <- scoreEvents
@@ -119,14 +115,14 @@ joinEvents eventid matchEvent teamEvents quarterEvent scoreEvents = do
                     }
 
 scoreEventsArr eventid = proc html -> do
-  matchEvent <- listA matchInfoArr -< html
+  matchEvent <- listA (matchInfoArr eventid) -< html
   teamEvents <- teamsArr -< html
   scoreLines' <- listA scoreLinesArr -< html
   let
     isQuarterLine = and . map ("quarter" `isInfixOf`)
     scoreEvents' =  fmap readScoreLine <$> wordsBy isQuarterLine scoreLines'
     quarterEvents = map (:[]) $ zip [1::Int ..] $ map readQuarterTime $ concat . filter isQuarterLine $ scoreLines'
-    scoreEvents = concat $ zipWith (joinEvents eventid matchEvent teamEvents) quarterEvents scoreEvents'
+    scoreEvents = concat $ zipWith (joinEvents matchEvent teamEvents) quarterEvents scoreEvents'
   returnA -< scoreEvents
 
 readScoreEventsFromFile html = do
