@@ -1,13 +1,13 @@
 {-# LANGUAGE Arrows        #-}
 {-# LANGUAGE TupleSections #-}
 
-module AFLTables.MatchStats.ScoreEvents
-  ( readScoreEventsFromFile
-  , html2csv
-  )
+module AFLTables.ScoreEvents
+  -- ( readScoreEventsFromFile
+  -- , html2csv
+  -- )
 where
 
-import           AFLTables.MatchStats.Types
+import           AFLTables.Types
 import           Control.Applicative
 import           Control.Monad
 import qualified Data.ByteString.Lazy     as BL (writeFile)
@@ -130,6 +130,6 @@ readScoreEventsFromFile html = do
   fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
     >>> scoreEventsArr matchid
 
-html2csv html csvOut = do
-  events <- readScoreEventsFromFile html
-  BL.writeFile csvOut (encodeDefaultOrderedByName events)
+-- html2csv html csvOut = do
+--   events <- readScoreEventsFromFile html
+--   BL.writeFile csvOut (encodeDefaultOrderedByName events)

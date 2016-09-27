@@ -1,41 +1,67 @@
+{-# LANGUAGE Arrows #-}
 module Main where
 
-import qualified Data.ByteString   as B (writeFile)
-import           Data.String.Utils (replace)
+import           AFLTables
+import qualified Data.ByteString      as B (writeFile)
+import qualified Data.ByteString.Lazy as BL (writeFile)
+import           Data.Maybe           (fromMaybe)
+import           Data.String.Utils    (replace)
 import           Development.Shake
-import           System.Exit       (ExitCode (ExitFailure), exitFailure,
-                                    exitSuccess)
-import           System.FilePath   (takeBaseName, (</>), takeDirectory)
-import System.Directory (createDirectoryIfMissing)
-import           Text.Printf       (printf)
-import Text.Regex.Posix (getAllTextMatches, (=~))
-import Data.Maybe (fromMaybe)
+import           System.Exit          (ExitCode (ExitFailure), exitFailure,
+                                       exitSuccess)
+import           System.FilePath      (splitDirectories, splitDirectories,
+                                       takeBaseName, takeDirectory, (<.>),
+                                       (</>))
+import           Text.Printf          (printf)
+import           Text.XML.HXT.Core
+import           Data.Csv                 (DefaultOrdered, ToField (..),
+                                           ToNamedRecord,
+                                           encodeDefaultOrderedByName)
 
+getYearS :: FilePath -> String
+getYearS = head . tail . splitDirectories
 getYear :: FilePath -> Int
-getYear = read . takeBaseName . takeBaseName
+getYear = read . getYearS
 
-insertYear :: Int -> FilePattern -> FilePath
-insertYear yr pat = replace "*" (show yr) pat
+-- insertYear :: Int -> FilePattern -> FilePath
+-- insertYear yr pat = replace "*" (show yr) pat
 
-withYrOf :: FilePath -> FilePattern -> FilePath
-withYrOf filepath filePat = insertYear (getYear filepath) filePat
+-- withYearOf :: FilePath -> FilePattern -> FilePath
+-- withYearOf filepath filePat = insertYear (getYear filepath) filePat
 
-outdir :: [Char]
 outdir = "output"
-
-seasonHtml :: FilePattern
-seasonHtml = outdir </> "*.season.html"
-
-eventIds = outdir </> "*.events/*.eventids.txt"
+seasonHtml = outdir </> "*/*.season.html"
+scoreEvents = outdir </> "*/scoreEvents.csv"
+playerEvents = outdir </> "*/playerEvents.csv"
+eventHtml = outdir </> "*/*.event.html"
 
 main :: IO ()
 main = shakeArgs shakeOptions{shakeFiles="build"} $ do
 
-  want $ map (flip insertYear eventIds) [2014, 2015]
+  want [outdir </> "2014/playerEvents.csv"]
 
-  seasonHtml
+  playerEvents
     %> \out -> do
-    let url = printf "http://afltables.com/afl/seas/%d.html" (getYear out)
+    let seasonhtml = outdir </> (getYearS out) </> (getYearS out) <.> "season.html"
+    need [seasonhtml]
+    eventids <- fmap getEventIds $ readFile' seasonhtml
+    let eventHtmls =  [outdir </> (getYearS out) </> (show eid) <.> "event.html"
+                      | eid <- eventids]
+    need eventHtmls
+    events <- liftIO $ fmap concat $ traverse readPlayerEventsFromFile eventHtmls
+    case sequenceA events of
+      Left msg -> error "empty"
+      Right playerEvents -> liftIO $
+        BL.writeFile out (encodeDefaultOrderedByName playerEvents)
+
+  seasonHtml %> \out -> do
+    let url = seasonURL (getYear out)
+    Stdout html  <- cmd $ "curl " ++ url
+    writeFile' out html
+
+  eventHtml %> \out -> do
+    let eventid = takeBaseName . takeBaseName $ out
+        url = eventURL (getYear out) (read eventid)
     Stdout html  <- command [] "curl" [url]
     writeFile' out html
     (Exit ret, Stderr err) <- cmd $ "tidy -q -modify " ++ out
@@ -43,12 +69,19 @@ main = shakeArgs shakeOptions{shakeFiles="build"} $ do
       (ExitFailure 2) -> error $ "html tidy failed with errors: " ++ err
       _ -> return ()
 
-  eventIds
-    %> \out -> do
-    let dep = withYrOf out seasonHtml
-    need [dep]
-    html <- readFile' dep
-    let pat = "[[:digit:]]{4}[[:digit:]]+\\.html"
-        eventids = map takeBaseName $ getAllTextMatches (html =~ pat) :: [String]
-    -- liftIO $ createDirectoryIfMissing False (takeDirectory out)
-    writeFile' out (unlines eventids)
+
+  -- eventIds
+  --   %> \out -> do
+  --   let year = getYear out
+  --       dep = insertYear year seasonHtml
+  --   need [dep]
+  --   html <- readFile' dep
+  --   let pat = "[[:digit:]]{4}[[:digit:]]+\\.html"
+  --       eventids = map (read . takeBaseName) $ getAllTextMatches (html =~ pat) :: [String]
+  --       urlPat = "http://afltables.com/afl/stats/games/%d/%d.html"
+  --       urls = map (\i->printf url year i) eventids
+  --       outPat = (takeDirectory out) </> "%d.html"
+  --       matchfiles = map (\i->printf outPat i) eventids
+  --   traverse_ (command [] "curl -o") urls
+
+  --   writeFile' out (unlines eventids)

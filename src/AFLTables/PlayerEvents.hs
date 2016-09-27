@@ -1,24 +1,26 @@
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE DeriveGeneric     #-}
-module AFLTables.MatchStats.PlayerEvent
+{-# LANGUAGE Arrows        #-}
+{-# LANGUAGE DeriveGeneric #-}
+module AFLTables.PlayerEvents
   where
 
-import           GHC.Generics
-import           Data.Char
-import           Text.HandsomeSoup (css)
-import           Text.XML.HXT.Core
-import           Data.Tree.NTree.TypeDefs
-import Text.Printf
-import AFLTables.MatchStats.Types (Alignment (..), Team (..))
+import           AFLTables.Types          (Alignment (..), Team (..))
 import qualified Data.ByteString.Lazy     as BL (writeFile)
-import           Data.Csv (ToField (..), ToNamedRecord, DefaultOrdered, encodeDefaultOrderedByName)
+import           Data.Char
+import           Data.Csv                 (DefaultOrdered, ToField (..),
+                                           ToNamedRecord,
+                                           encodeDefaultOrderedByName)
+import           Data.Tree.NTree.TypeDefs
+import           GHC.Generics
 import           System.FilePath          (takeBaseName)
+import           Text.HandsomeSoup        (css)
+import           Text.Printf
+import           Text.XML.HXT.Core
 
 data PlayerEvent = PlayerEvent
-  { eventid :: Int
-  , team :: Team
-  , jumper :: Int
-  , player :: String
+  { eventid                                                                   :: Int
+  , team                                                                      :: Team
+  , jumper                                                                    :: Int
+  , player                                                                    :: String
   , ki,mk,hb,di,gl,bh,ho,k,r,i50,cl,cg,ff,fa,br,cp,up,cm,mi,onePct,bo,ga,pctp :: Maybe Int
   } deriving (Show, Generic)
 
@@ -62,12 +64,15 @@ readStatsLine eventid team (jumper:player:xs) = case map toMaybeInt xs of
 readStatsLine _ _ _ = Left "stats line less than 3 elements long"
 
 readPlayerEventsFromFile html = do
-  let eventid = read $ takeBaseName html
-  fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
+  let eventid = read $ takeBaseName . takeBaseName $ html
+  fmap concat $ runX $ readDocument [withWarnings no, withParseHTML yes, withRemoveWS yes] html
     >>> playerEventsArr eventid
 
-html2csv html csvOut = do
-  events <- readPlayerEventsFromFile html
-  case sequenceA events of
-    Left errMsg -> putStrLn errMsg
-    Right events' -> BL.writeFile csvOut (encodeDefaultOrderedByName events')
+playerEventsHtmlArr eventid = readFromDocument [withParseHTML yes, withRemoveWS yes]
+                              >>> playerEventsArr eventid
+
+-- html2csv html csvOut = do
+--   events <- readPlayerEventsFromFile html
+--   case sequenceA events of
+--     Left errMsg -> putStrLn errMsg
+--     Right events' -> BL.writeFile csvOut (encodeDefaultOrderedByName events')
