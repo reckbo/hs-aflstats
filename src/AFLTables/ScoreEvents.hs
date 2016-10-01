@@ -8,6 +8,7 @@ module AFLTables.ScoreEvents
 where
 
 import           AFLTables.Types
+import           AFLTables.URL
 import           Control.Applicative
 import           Control.Monad
 import qualified Data.ByteString.Lazy     as BL (writeFile)
@@ -21,25 +22,26 @@ import           Data.Tree.NTree.TypeDefs
 import           System.FilePath          (takeBaseName)
 import           Text.HandsomeSoup        (css)
 import           Text.XML.HXT.Core
+import           Text.XML.HXT.XPath.Arrows
 
 trim :: String -> String
 trim = unwords . words
 
-readScoreLine :: [String] -> ScoreEvent'
+readScoreLine :: [String] -> Either String ScoreEvent'
 readScoreLine xs = case head xs of
   "\160" -> readScoreLine' Away $ reverse xs
   _ ->  readScoreLine' Home $ xs
   where
-   readScoreLine' align (description:t':_) =
+   readScoreLine' align xs@(description:t':_) =
       let t = readTime t'
       in
         if "Rushed" `isInfixOf` description
-          then (align, t, RushedBehind, Nothing)
+          then Right (align, t, RushedBehind, Nothing)
           else case reverse . words $ description of
-                "behind":name -> (align, t, Behind, Just $ unwords name)
-                "goal":name -> (align, t, Goal, Just $ unwords name)
-                _ -> error $ "Unexpected goal type in: " ++ description
-   readScoreLine' _ xs = error $ "couldnt parse " ++ (unwords xs)
+                "behind":name -> Right (align, t, Behind, Just $ unwords name)
+                "goal":name -> Right (align, t, Goal, Just $ unwords name)
+                _ -> Left $ "Unexpected goal type in: " ++ (unwords xs)
+   readScoreLine' _ xs = Left $ "couldnt parse " ++ (unwords xs)
 
 readDate :: String -> LocalTime
 readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
@@ -47,7 +49,7 @@ readDate t = fromJust $ parseTimeM True defaultTimeLocale fmt t'
     t' = trim $ takeWhile (/='(') t
     fmt = "%a, %e-%b-%Y %l:%M %p"
 
-matchInfoArr :: Int -> IOSLA (XIOState ()) (NTree XNode) MatchEvent
+matchInfoArr :: EventID -> IOSLA (XIOState ()) (NTree XNode) MatchEvent
 matchInfoArr eventid = (css "table:first-child" >>>
                         css "tr:first-child" >>>
                         css "td:nth-child(2)" >>>
@@ -60,12 +62,14 @@ matchInfoArr eventid = (css "table:first-child" >>>
                           attendance <- (!! 7) -< l
                           returnA -< (eventid, trim rnd, venue, (readDate date), (read attendance))
 
-scoreLinesArr = (css "table:nth-child(8)"
+scoreLinesArr eventid = (getXPathTrees "//table[tr[th[contains(.,'Scoring progression')]]]"
                   >>> css "tr"
                   >>> listA scoringLineArr)
-                  >>. tail . tail . init -- last and first 2 rows
+                  >>. subset
                   where
                     scoringLineArr =  css "td" >>> listA (deep getText >>. unwords)
+                    subset (h1:h2:xs) = init xs
+                    subset _ = error $ "No valid score table found for: " ++ show eventid
 
 teamsArr :: IOSLA (XIOState ()) (NTree XNode) [(Team,Alignment)]
 teamsArr = (css "table:nth-child(8)"
@@ -114,22 +118,32 @@ joinEvents matchEvent teamEvents quarterEvent scoreEvents = do
                     , _scorer      = player
                     }
 
+scoreEventsArr
+  :: EventID -> IOSLA (XIOState ()) (NTree XNode) (Either String [ScoreEvent])
 scoreEventsArr eventid = proc html -> do
   matchEvent <- listA (matchInfoArr eventid) -< html
   teamEvents <- teamsArr -< html
-  scoreLines' <- listA scoreLinesArr -< html
+  scoreLines' <- listA (scoreLinesArr eventid) -< html
   let
     isQuarterLine = and . map ("quarter" `isInfixOf`)
-    scoreEvents' =  fmap readScoreLine <$> wordsBy isQuarterLine scoreLines'
+    scoreEvents' =  sequenceA <$> map readScoreLine <$> wordsBy isQuarterLine scoreLines'
     quarterEvents = map (:[]) $ zip [1::Int ..] $ map readQuarterTime $ concat . filter isQuarterLine $ scoreLines'
-    scoreEvents = concat $ zipWith (joinEvents matchEvent teamEvents) quarterEvents scoreEvents'
+    scoreEvents = case sequenceA scoreEvents' of
+      Left msg -> (Left msg)
+      Right scoreEvents'' -> Right $ concat $ zipWith (joinEvents matchEvent teamEvents) quarterEvents scoreEvents''
   returnA -< scoreEvents
 
-readScoreEventsFromFile html = do
-  let matchid = read $ takeBaseName html
-  fmap concat $ runX $ readDocument [withParseHTML yes, withRemoveWS yes] html
-    >>> scoreEventsArr matchid
+preCheckArr = this //> hasText (isInfixOf "This page has been sent off")
 
--- html2csv html csvOut = do
---   events <- readScoreEventsFromFile html
---   BL.writeFile csvOut (encodeDefaultOrderedByName events)
+readScoreEventsFromFile ::
+  String -> String -> IO (Either String [ScoreEvent])
+readScoreEventsFromFile eventid htmlfile = do
+  [events] <- runX $
+    constA htmlfile
+    >>> readFromDocument [withWarnings no, withParseHTML yes, withRemoveWS yes]
+    >>> (ifA
+         preCheckArr
+         (constA $ Left $ "Score Events page is an invalid AFLTables page: "
+          ++ eventid)
+         (scoreEventsArr eventid))
+  return events

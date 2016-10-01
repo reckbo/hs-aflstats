@@ -1,28 +1,36 @@
 module AFLTables
   ( module AFLTables.PlayerEvents
   , module AFLTables.ScoreEvents
-  , seasonURL
-  , eventURL
   , getEventIds
+  , writeCSV
+  , readCSV
   )
 
 where
 
 import           AFLTables.PlayerEvents
 import           AFLTables.ScoreEvents
+import           AFLTables.Types
+import qualified Data.ByteString.Lazy   as BL (readFile, writeFile)
+import           Data.Csv               (DefaultOrdered, FromNamedRecord,
+                                         Header, ToNamedRecord, decodeByName,
+                                         encodeDefaultOrderedByName)
+import           Data.Vector            (Vector (..))
 import           System.FilePath        (takeBaseName)
 import           Text.Printf
 import           Text.Regex.Posix       (getAllTextMatches, (=~))
+import qualified Data.Vector as V
+import Data.Either (either)
 
 type HTML = String
 
-seasonURL :: Int -> String
-seasonURL year = "http://afltables.com/afl/seas/" ++ (show year) ++ ".html"
-
-eventURL :: Int -> Int -> String
-eventURL year eventid = printf "http://afltables.com/afl/stats/games/%d/%d.html" year eventid
-
-getEventIds :: HTML -> [Int]
+getEventIds :: HTML -> [EventID]
 getEventIds html
-  = map (read . takeBaseName) (getAllTextMatches (html =~ pat) :: [String])
+  = map takeBaseName (getAllTextMatches (html =~ pat) :: [String])
   where pat = "[[:digit:]]{4}[[:digit:]]+\\.html"
+
+writeCSV :: (DefaultOrdered a, ToNamedRecord a) => FilePath -> [a] -> IO ()
+writeCSV csv events = BL.writeFile csv (encodeDefaultOrderedByName events)
+
+readCSV :: (FromNamedRecord a) => FilePath -> IO (Either String [a])
+readCSV csv = fmap (V.toList . snd) <$> decodeByName <$> BL.readFile csv

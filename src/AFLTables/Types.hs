@@ -2,8 +2,11 @@
 module AFLTables.Types where
 
 import           GHC.Generics
-import           Data.Csv (ToField (..), ToNamedRecord, DefaultOrdered)
-import           Data.Time                (LocalTime) 
+import           Data.Csv (ToField (..),
+                           FromField (..),
+                           ToNamedRecord, FromNamedRecord,
+                           DefaultOrdered)
+import           Data.Time                (LocalTime)
 import qualified Data.ByteString.Char8    as B8
 
 data Alignment = Home | Away
@@ -12,7 +15,7 @@ data Alignment = Home | Away
 data ScoreType = Goal | Behind | RushedBehind
   deriving Show
 
-type MatchEvent = (Int, Round, Venue, LocalTime, Attendance)
+type MatchEvent = (EventID, Round, Venue, LocalTime, Attendance)
 type TeamEvent = (Team, Alignment)
 type QuarterEvent = (Int, Time)
 type ScoreEvent' = (Alignment, Time, ScoreType, Maybe Player)
@@ -22,7 +25,7 @@ type Team = String
 type Time = Int
 
 data ScoreEvent = ScoreEvent
-  { _eventid     :: Int
+  { _eventid     :: EventID
   , _round       :: String
   , _venue       :: String
   , _date        :: LocalTime
@@ -43,9 +46,34 @@ instance ToField ScoreType where
   toField x =  B8.pack $ show x
 instance ToField Alignment where
   toField x =  B8.pack $ show x
+instance FromField LocalTime where
+  parseField x =  pure . read . B8.unpack $ x
+instance FromField ScoreType where
+  parseField x = case B8.unpack x of
+    "Behind" -> pure Behind
+    "RushedBehind" -> pure RushedBehind
+    "Goal" -> pure Goal
+instance FromField Alignment where
+  parseField x =  case B8.unpack x of
+    "Home" -> pure Home
+    "Away" -> pure Away
+
 instance ToNamedRecord ScoreEvent
+instance FromNamedRecord ScoreEvent
 instance DefaultOrdered ScoreEvent
+
+data PlayerEvent = PlayerEvent
+  { eventid                                                                   :: EventID
+  , team                                                                      :: Team
+  , jumper                                                                    :: Int
+  , player                                                                    :: String
+  , ki,mk,hb,di,gl,bh,ho,k,r,i50,cl,cg,ff,fa,br,cp,up,cm,mi,onePct,bo,ga,pctp :: Maybe Int
+  } deriving (Show, Generic)
+
+instance ToNamedRecord PlayerEvent
+instance DefaultOrdered PlayerEvent
 
 type Round = String
 type Venue = String
 type Attendance = Int
+type EventID = String
