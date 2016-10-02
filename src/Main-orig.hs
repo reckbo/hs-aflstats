@@ -1,11 +1,8 @@
 {-# LANGUAGE Arrows #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 module Main where
 
 import           AFLTables
-import           AFLTables.Types (ScoreEvent (..), EventID)
+import           AFLTables.Types (ScoreEvent (..))
 import           AFLTables.URL (eventURL, seasonURL)
 import qualified Data.ByteString      as B (writeFile)
 import           Data.Maybe           (fromMaybe)
@@ -24,39 +21,26 @@ import           Data.Csv                 (DefaultOrdered, ToField (..),
 import qualified Data.Vector as V
 import Development.Shake.Rule
 import Development.Shake.Classes
-import System.Directory as IO
-import Data.Time (UTCTime (..), utctDayTime)
+-- import System.Directory as IO
 
-type Year = Int
+getYearS :: FilePath -> String
+getYearS = head . tail . splitDirectories
+getYear :: FilePath -> Int
+getYear = read . getYearS
 
-newtype EventHtmlQ = EventHtmlQ (Year, EventID)
-    deriving (Show,Binary,NFData,Hashable,Typeable,Eq)
+-- insertYear :: Int -> FilePattern -> FilePath
+-- insertYear yr pat = replace "*" (show yr) pat
 
-getModTime :: FilePath -> IO Double
-getModTime = fmap utcToDouble . getModificationTime
-  where
-    utcToDouble = fromRational . toRational . utctDayTime
-
-eventHtml (EventHtmlQ (year, eventid)) = "_data/events" </> (show year) </> eventid <.> "html"
-
-instance Rule EventHtmlQ Double where
-    storedValue _ q = do
-        exists <- IO.doesFileExist $ eventHtml q
-        if not exists then return Nothing
-          else fmap Just $ getModTime $ eventHtml q
-    equalValue _ _ old new = if old == new then EqualCheap else NotEqual
+-- withYearOf :: FilePath -> FilePattern -> FilePath
+-- withYearOf filepath filePat = insertYear (getYear filepath) filePat
 
 outdir = "output"
 seasonHtml = outdir </> "*/*.season.html"
 eventIds = outdir </> "*/eventids.txt"
 scoreEvents = outdir </> "*/scoreEvents.csv"
 playerEvents = outdir </> "*/playerEvents.csv"
--- eventHtml = outdir </> "*/*.event.html"
+eventHtml = outdir </> "*/*.event.html"
 scoreCsv = outdir </> "*/*.scoreEvents.csv"
-getYearS :: FilePath -> String
-getYearS = head . tail . splitDirectories
-getYear :: FilePath -> Int
-getYear = read . getYearS
 
 main :: IO ()
 main = shakeArgs shakeOptions{shakeFiles="build", shakeVerbosity=Chatty} $ do
@@ -64,15 +48,6 @@ main = shakeArgs shakeOptions{shakeFiles="build", shakeVerbosity=Chatty} $ do
   -- want [outdir </> "2014/playerEvents.csv"
   --      ,outdir </> "2014/scoreEvents.csv"]
   want [outdir </> "2014/scoreEvents.csv"]
-
-  rule $ \q@(EventHtmlQ (year, eventid)) -> Just $ do
-      opts <- getShakeOptions
-      Stdout html  <- command [] "curl" [eventURL year eventid]
-      writeFile' (eventHtml q) html
-      (Exit ret, Stderr err) <- cmd $ "tidy -q -modify " ++ (eventHtml q)
-      case ret of
-        (ExitFailure 2) -> error $ "html tidy failed with errors: " ++ err
-        _ -> liftIO $ getModTime (eventHtml q)
 
   scoreEvents
     %> \out -> do
@@ -95,7 +70,7 @@ main = shakeArgs shakeOptions{shakeFiles="build", shakeVerbosity=Chatty} $ do
     let eventid = takeBaseName . takeBaseName $ out
         year = getYear out
         eventHtml = outdir </> (show year) </> eventid <.> "event.html"
-    apply1 $ EventHtmlQ (year, eventid) :: Action Double
+    need [eventHtml]
     events <- liftIO $ readScoreEventsFromFile eventid eventHtml
     case events of
       Left msg -> error $ msg ++ "\nfrom url: " ++ eventURL year eventid
@@ -117,6 +92,17 @@ main = shakeArgs shakeOptions{shakeFiles="build", shakeVerbosity=Chatty} $ do
     let url = seasonURL (getYear out)
     Stdout html  <- cmd $ "curl " ++ url
     writeFileLines out (getEventIds html)
+
+  eventHtml %> \out -> do
+    let eventid = takeBaseName . takeBaseName $ out
+        url = eventURL (getYear out) eventid
+    Stdout html  <- command [] "curl" [url]
+    writeFile' out html
+    (Exit ret, Stderr err) <- cmd $ "tidy -q -modify " ++ out
+    case ret of
+      (ExitFailure 2) -> error $ "html tidy failed with errors: " ++ err
+      _ -> return ()
+
 
   -- eventIds
   --   %> \out -> do
