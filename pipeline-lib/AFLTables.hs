@@ -1,26 +1,26 @@
 module AFLTables
   ( module AFLTables.PlayerEvents
   , module AFLTables.ScoreEvents
+  , module AFLTables.URL
+  , module AFLTables.Types
   , getEventIds
   , writeCSV
   , readCSV
-  )
-
-where
+  ) where
 
 import           AFLTables.PlayerEvents
 import           AFLTables.ScoreEvents
 import           AFLTables.Types
+import           AFLTables.URL
 import qualified Data.ByteString.Lazy   as BL (readFile, writeFile)
 import           Data.Csv               (DefaultOrdered, FromNamedRecord,
                                          Header, ToNamedRecord, decodeByName,
                                          encodeDefaultOrderedByName)
-import           Data.Vector            (Vector (..))
+import           Data.Either            (either)
+import qualified Data.Vector            as V
 import           System.FilePath        (takeBaseName)
 import           Text.Printf
 import           Text.Regex.Posix       (getAllTextMatches, (=~))
-import qualified Data.Vector as V
-import Data.Either (either)
 
 type HTML = String
 

@@ -27,7 +27,7 @@ import           Text.XML.HXT.XPath.Arrows
 trim :: String -> String
 trim = unwords . words
 
-readScoreLine :: [String] -> Either String ScoreEvent'
+readScoreLine :: [String] -> Either String ScoreEventLine
 readScoreLine xs = case head xs of
   "\160" -> readScoreLine' Away $ reverse xs
   _ ->  readScoreLine' Home $ xs
@@ -96,7 +96,7 @@ readQuarterTime = readTime . striphead . striptail
 joinEvents :: [MatchEvent] ->
               [TeamEvent] ->
               [QuarterEvent] ->
-              [ScoreEvent'] ->
+              [ScoreEventLine] ->
               [ScoreEvent]
 joinEvents matchEvent teamEvents quarterEvent scoreEvents = do
   (eventid, rnd, venue, date, attendance) <- matchEvent -- expect a one element list

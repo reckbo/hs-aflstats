@@ -18,7 +18,7 @@ data ScoreType = Goal | Behind | RushedBehind
 type MatchEvent = (EventID, Round, Venue, LocalTime, Attendance)
 type TeamEvent = (Team, Alignment)
 type QuarterEvent = (Int, Time)
-type ScoreEvent' = (Alignment, Time, ScoreType, Maybe Player)
+type ScoreEventLine = (Alignment, Time, ScoreType, Maybe Player)
 
 type Player = String
 type Team = String
