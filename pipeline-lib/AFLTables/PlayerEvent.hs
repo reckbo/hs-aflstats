@@ -1,21 +1,33 @@
 {-# LANGUAGE Arrows        #-}
 {-# LANGUAGE DeriveGeneric #-}
-module AFLTables.PlayerEvents
+module AFLTables.PlayerEvent
+  (PlayerEvent (..)
+  ,playerEventsArr)
   where
 
-import           AFLTables.Types          (Alignment (..), EventID,
-                                           PlayerEvent (..), Team (..))
-import qualified Data.ByteString.Lazy     as BL (writeFile)
+import           AFLTables.Types
 import           Data.Char
-import           Data.Csv                 (DefaultOrdered, ToField (..),
-                                           ToNamedRecord,
-                                           encodeDefaultOrderedByName)
+import           Data.Csv                 (DefaultOrdered, FromNamedRecord,
+                                           ToField (..), ToNamedRecord)
 import           Data.Tree.NTree.TypeDefs
 import           GHC.Generics
-import           System.FilePath          (takeBaseName)
 import           Text.HandsomeSoup        (css)
 import           Text.Printf
 import           Text.XML.HXT.Core
+
+data PlayerEvent = PlayerEvent
+  { eventid :: EventID
+  , team    :: Team
+  , jumper  :: Int
+  , player  :: String
+  , ki,mk,hb,di,gl,bh,ho,k,r,i50,
+    cl,cg,ff,fa,br,cp,up,cm,mi,
+    onePct,bo,ga,pctp :: Maybe Int
+  } deriving (Show, Generic)
+
+instance ToNamedRecord PlayerEvent
+instance FromNamedRecord PlayerEvent
+instance DefaultOrdered PlayerEvent
 
 tableArr align = let x = if align == Home then 3 else 5 :: Int
                  in css (printf "table:nth-child(%d)" x)
@@ -58,11 +70,3 @@ readStatsLine eventid team (jumper:player:xs) = case map toMaybeInt xs of
     toMaybeInt x | and . map isDigit $ x = Just (read x)
                  | otherwise = Nothing
 readStatsLine _ _ _ = Left "stats line less than 3 elements long"
-
-readPlayerEventsFromHtml :: EventID -> String -> IO (Either String [PlayerEvent])
-readPlayerEventsFromHtml eventid html = do
-  [events] <- runX $
-    constA html
-    >>> readFromDocument [withWarnings no, withParseHTML yes, withRemoveWS yes]
-    >>> playerEventsArr eventid
-  return events

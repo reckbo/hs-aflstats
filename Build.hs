@@ -1,51 +1,33 @@
-{-# LANGUAGE Arrows                #-}
-{-# LANGUAGE DeriveAnyClass        #-}
-{-# LANGUAGE DeriveGeneric         #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric  #-}
 
 module Main where
 
 import qualified AFLTables                 as AFL (EventID, PlayerEvent (..),
                                                    ScoreEvent (..), getEventIds,
                                                    matchURL, readCSV,
-                                                   readPlayerEventsFromHtml,
-                                                   readScoreEventsFromHtml,
+                                                   readEventsFromHtml,
                                                    seasonURL, writeCSV)
-import qualified Data.ByteString           as B (writeFile)
-import           Data.Csv                  (DefaultOrdered, ToField (..),
-                                            ToNamedRecord,
-                                            encodeDefaultOrderedByName)
-import           Data.Maybe                (fromMaybe)
-import           Data.String.Utils         (replace)
-import           Data.Time                 (UTCTime (..), utctDayTime)
-import qualified Data.Vector               as V
 import           Development.Shake
 import           Development.Shake.Classes
 import           Development.Shake.Config
 import           Development.Shake.Rule
-import           GHC.Generics
 import           Shake.BuildNode
-import           System.Directory          as IO
-import           System.Exit               (ExitCode (ExitFailure), exitFailure,
-                                            exitSuccess)
-import           System.FilePath           (splitDirectories, splitDirectories,
-                                            takeBaseName, takeDirectory, (<.>),
-                                            (</>))
+import           System.Exit               (ExitCode (ExitFailure))
 
 outdir = "_data"
 
 type Year = Int
 
-data Event = PlayerEvent | ScoreEvent
+data EventType = PlayerEvent | ScoreEvent
            deriving (Generic,Typeable,Show,Eq,Hashable,Binary,NFData)
 
 data MatchOutput = MatchHtml Year AFL.EventID
-                 | MatchCsv Event Year AFL.EventID
+                 | MatchCsv EventType Year AFL.EventID
                  deriving (Generic,Typeable,Show,Eq,Hashable,Binary,NFData)
 
 data SeasonOutput = SeasonHtml Year
-                  | SeasonCsv Event Year
+                  | SeasonCsv EventType Year
                   deriving (Generic,Typeable,Show,Eq,Hashable,Binary,NFData)
 
 instance BuildNode MatchOutput where
@@ -60,56 +42,56 @@ instance BuildNode MatchOutput where
       (ExitFailure 2) -> error $ "html tidy failed with errors: " ++ err
       _ -> return ()
 
-  build out@(MatchCsv ScoreEvent year eventid) = Just $ do
-     let matchhtml = MatchHtml year eventid
-     apply1 matchhtml :: Action [Double]
-     events <- liftIO $ AFL.readScoreEventsFromHtml eventid (path matchhtml)
-     case events of
-       Left msg -> error $ msg ++ "\nfrom url: " ++ AFL.matchURL year eventid
-       Right events' -> liftIO $ AFL.writeCSV (path out) events'
-
-  build out@(MatchCsv PlayerEvent year eventid) = Just $ do
-     let matchhtml = MatchHtml year eventid
-     apply1 matchhtml :: Action [Double]
-     events <- liftIO $ AFL.readPlayerEventsFromHtml eventid (path matchhtml)
-     case events of
-       Left msg -> error $ msg ++ "\nfrom url: " ++ AFL.matchURL year eventid
-       Right events' -> liftIO $ AFL.writeCSV (path out) events'
+  build out@(MatchCsv eventtype year eventid) = case eventtype of
+    ScoreEvent -> action (AFL.readEventsFromHtml :: AFL.EventID -> FilePath -> IO (Either String [AFL.ScoreEvent]))
+    PlayerEvent -> action (AFL.readEventsFromHtml :: AFL.EventID -> FilePath -> IO (Either String [AFL.PlayerEvent]))
+    where
+      action readEventsFn = Just $ do
+        apply1 (MatchHtml year eventid) :: Action [Double]
+        events <- liftIO $ readEventsFn eventid (path $ MatchHtml year eventid)
+        case events of
+          Left msg -> error $ msg ++ "\nfrom url: " ++ AFL.matchURL year eventid
+          Right events' -> liftIO $ AFL.writeCSV (path out) events'
 
 
 instance BuildNode SeasonOutput where
   path (SeasonHtml year) = outdir </> (show year) </> "season.html"
-  path (SeasonCsv event year) = case event of
-    ScoreEvent -> outdir </> (show year) </> "scoreEvent" <.> "csv"
-    PlayerEvent -> outdir </> (show year) </> "playerEvent" <.> "csv"
+  path (SeasonCsv ScoreEvent year) = outdir </> (show year) </> "scoreEvent" <.> "csv"
+  path (SeasonCsv PlayerEvent year) = outdir </> (show year) </> "playerEvent" <.> "csv"
 
   build out@(SeasonHtml year) = Just $ do
     command_ [] "curl" [AFL.seasonURL year, "-o", path out]
 
-  build out@(SeasonCsv ScoreEvent year) = Just $ do
-     Stdout html <- cmd $ "curl " ++ (AFL.seasonURL year)
-     let eventids = AFL.getEventIds html
-     let matchScoreEvents = [MatchCsv ScoreEvent year eventid | eventid <- eventids ]
-     apply matchScoreEvents :: Action [[Double]]
-     allScoreEvents <- liftIO $ traverse (AFL.readCSV . path) matchScoreEvents  :: Action [Either String [AFL.ScoreEvent]]
-     case sequenceA allScoreEvents of
-       Left msg -> error msg
-       Right rows -> liftIO $ AFL.writeCSV (path out) $ concat rows
+  build out@(SeasonCsv event year) = case event of
+    ScoreEvent -> action (AFL.readCSV :: FilePath -> IO (Either String [AFL.ScoreEvent]))
+    PlayerEvent -> action (AFL.readCSV :: FilePath -> IO (Either String [AFL.PlayerEvent]))
+    where
+      action readCsvFn = Just $ do
+        apply1 (SeasonHtml year) :: Action [Double]
+        seasonHtml <- readFile' (path $ SeasonHtml year)
+        let eventids = AFL.getEventIds seasonHtml
+        let matchEvents = [MatchCsv event year eventid | eventid <- eventids ]
+        apply matchEvents :: Action [[Double]]
+        seasonEvents <- liftIO $ traverse (readCsvFn . path) matchEvents
+        case sequenceA seasonEvents of
+          Left msg -> error msg
+          Right rows -> liftIO $ AFL.writeCSV (path out) $ concat rows
 
-  build out@(SeasonCsv PlayerEvent year) = Just $ do
-     Stdout html <- cmd $ "curl " ++ (AFL.seasonURL year)
-     let eventids = AFL.getEventIds html
-     let matchevents = [MatchCsv PlayerEvent year eventid | eventid <- eventids ]
-     apply matchevents :: Action [[Double]]
-     allevents <- liftIO $ traverse (AFL.readCSV . path) matchevents  :: Action [Either String [AFL.PlayerEvent]]
-     case sequenceA allevents of
-       Left msg -> error msg
-       Right rows -> liftIO $ AFL.writeCSV (path out) $ concat rows
+makeAllSeasonsCsv event out = case event of
+  ScoreEvent -> action (AFL.readCSV :: FilePath -> IO (Either String [AFL.ScoreEvent]))
+  PlayerEvent -> action (AFL.readCSV :: FilePath -> IO (Either String [AFL.PlayerEvent]))
+  where action (readCsvFn) = do
+          Just years <- getConfig "years"
+          let csvs = map (SeasonCsv event) (map read $ words years)
+          apply csvs :: Action [[Double]]
+          allevents <- liftIO $ traverse (readCsvFn . path) csvs
+          case sequenceA allevents of
+            Left msg -> error msg
+            Right rows -> liftIO $ AFL.writeCSV out (concat rows)
 
 
 main :: IO ()
 main = shakeArgs shakeOptions{shakeFiles=outdir, shakeVerbosity=Chatty} $ do
-
   usingConfigFile "afltables.cfg"
 
   want [outdir </> "playerEvent.csv"
@@ -117,21 +99,5 @@ main = shakeArgs shakeOptions{shakeFiles=outdir, shakeVerbosity=Chatty} $ do
 
   rule $ (buildNode :: SeasonOutput -> Maybe (Action [Double]))
   rule $ (buildNode :: MatchOutput -> Maybe (Action [Double]))
-
-  outdir </> "playerEvent.csv" %> \out -> do
-    Just years <- getConfig "years"
-    let csvs = map (SeasonCsv PlayerEvent) (map read $ words years)
-    apply csvs :: Action [[Double]]
-    allevents <- liftIO $ traverse (AFL.readCSV . path) csvs  :: Action [Either String [AFL.PlayerEvent]]
-    case sequenceA allevents of
-      Left msg -> error msg
-      Right rows -> liftIO $ AFL.writeCSV out (concat rows)
-
-  outdir </> "scoreEvent.csv" %> \out -> do
-    Just years <- getConfig "years"
-    let csvs = map (SeasonCsv ScoreEvent) (map read $ words years)
-    apply csvs :: Action [[Double]]
-    allevents <- liftIO $ traverse (AFL.readCSV . path) csvs  :: Action [Either String [AFL.ScoreEvent]]
-    case sequenceA allevents of
-      Left msg -> error msg
-      Right rows -> liftIO $ AFL.writeCSV out (concat rows)
+  outdir </> "playerEvent.csv" %> \out -> makeAllSeasonsCsv PlayerEvent out
+  outdir </> "scoreEvent.csv" %> \out -> makeAllSeasonsCsv ScoreEvent out

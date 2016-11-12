@@ -1,28 +1,83 @@
 {-# LANGUAGE Arrows        #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TupleSections #-}
 
-module AFLTables.ScoreEvents
-  -- ( readScoreEventsFromFile
-  -- , html2csv
-  -- )
+module AFLTables.ScoreEvent
+  (ScoreEvent (..)
+  ,scoreEventsArr)
 where
 
-import           AFLTables.Types
-import           AFLTables.URL
 import           Control.Applicative
 import           Control.Monad
-import qualified Data.ByteString.Lazy     as BL (writeFile)
-import           Data.Csv                 (encodeDefaultOrderedByName)
-import           Data.List                (isInfixOf)
-import           Data.List.Split          (wordsBy)
-import           Data.Maybe               (fromJust)
-import           Data.Time                (LocalTime, defaultTimeLocale,
-                                           parseTimeM)
+import           Data.Csv                  (DefaultOrdered, FromField (..),
+                                            FromNamedRecord, ToField (..),
+                                            ToNamedRecord)
+import           Data.List                 (isInfixOf)
+import           Data.List.Split           (wordsBy)
+import           Data.Maybe                (fromJust)
+import           Data.Time                 (LocalTime, defaultTimeLocale,
+                                            parseTimeM)
 import           Data.Tree.NTree.TypeDefs
-import           System.FilePath          (takeBaseName)
-import           Text.HandsomeSoup        (css)
+import           Text.HandsomeSoup         (css)
 import           Text.XML.HXT.Core
 import           Text.XML.HXT.XPath.Arrows
+
+import           AFLTables.Types
+import qualified Data.ByteString.Char8     as B8
+import           Data.Time                 (LocalTime)
+import           GHC.Generics
+
+data ScoreType = Goal | Behind | RushedBehind
+  deriving Show
+
+type MatchEvent = (EventID, Round, Venue, LocalTime, Attendance)
+type TeamEvent = (Team, Alignment)
+type QuarterEvent = (Int, Time)
+type ScoreEventLine = (Alignment, Time, ScoreType, Maybe Player)
+
+type Time = Int
+
+data ScoreEvent = ScoreEvent
+  { _eventid     :: EventID
+  , _round       :: String
+  , _venue       :: String
+  , _date        :: LocalTime
+  , _attendance  :: Int
+  , _quarter     :: Int
+  , _quarterTime :: Int
+  , _team        :: String
+  , _alignment   :: Alignment
+  , _time        :: Time
+  , _scoreType   :: ScoreType
+  , _scorer      :: Maybe Player
+  }
+  deriving (Show, Generic)
+
+instance ToField LocalTime where
+  toField x =  B8.pack $ show x
+instance ToField ScoreType where
+  toField x =  B8.pack $ show x
+instance ToField Alignment where
+  toField x =  B8.pack $ show x
+instance FromField LocalTime where
+  parseField x =  pure . read . B8.unpack $ x
+instance FromField ScoreType where
+  parseField x = case B8.unpack x of
+    "Behind" -> pure Behind
+    "RushedBehind" -> pure RushedBehind
+    "Goal" -> pure Goal
+instance FromField Alignment where
+  parseField x =  case B8.unpack x of
+    "Home" -> pure Home
+    "Away" -> pure Away
+
+instance ToNamedRecord ScoreEvent
+instance FromNamedRecord ScoreEvent
+instance DefaultOrdered ScoreEvent
+
+type Round = String
+type Venue = String
+type Attendance = Int
 
 trim :: String -> String
 trim = unwords . words
@@ -132,17 +187,3 @@ scoreEventsArr eventid = proc html -> do
       Left msg -> (Left msg)
       Right scoreEvents'' -> Right $ concat $ zipWith (joinEvents matchEvent teamEvents) quarterEvents scoreEvents''
   returnA -< scoreEvents
-
-preCheckArr = this //> hasText (isInfixOf "This page has been sent off")
-
-readScoreEventsFromHtml :: String -> String -> IO (Either String [ScoreEvent])
-readScoreEventsFromHtml eventid htmlfile = do
-  [events] <- runX $
-    constA htmlfile
-    >>> readFromDocument [withWarnings no, withParseHTML yes, withRemoveWS yes]
-    >>> (ifA
-         preCheckArr
-         (constA $ Left $ "Score Events page is an invalid AFLTables page: "
-          ++ eventid)
-         (scoreEventsArr eventid))
-  return events
