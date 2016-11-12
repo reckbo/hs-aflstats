@@ -4,7 +4,8 @@ module AFLTables.Types where
 import           GHC.Generics
 import           Data.Csv (ToField (..),
                            FromField (..),
-                           ToNamedRecord, FromNamedRecord,
+                           ToNamedRecord,
+                           FromNamedRecord,
                            DefaultOrdered)
 import           Data.Time                (LocalTime)
 import qualified Data.ByteString.Char8    as B8
@@ -71,6 +72,7 @@ data PlayerEvent = PlayerEvent
   } deriving (Show, Generic)
 
 instance ToNamedRecord PlayerEvent
+instance FromNamedRecord PlayerEvent
 instance DefaultOrdered PlayerEvent
 
 type Round = String

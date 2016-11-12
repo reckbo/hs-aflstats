@@ -135,9 +135,8 @@ scoreEventsArr eventid = proc html -> do
 
 preCheckArr = this //> hasText (isInfixOf "This page has been sent off")
 
-readScoreEventsFromFile ::
-  String -> String -> IO (Either String [ScoreEvent])
-readScoreEventsFromFile eventid htmlfile = do
+readScoreEventsFromHtml :: String -> String -> IO (Either String [ScoreEvent])
+readScoreEventsFromHtml eventid htmlfile = do
   [events] <- runX $
     constA htmlfile
     >>> readFromDocument [withWarnings no, withParseHTML yes, withRemoveWS yes]

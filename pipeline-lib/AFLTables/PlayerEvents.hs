@@ -38,12 +38,11 @@ playerEventsArr' eventid align = proc html -> do
   lines <- linesArr align -< html
   returnA -< (readStatsLine eventid team) lines
 
-playerEventsArr ::
-  EventID -> IOSLA (XIOState ()) (NTree XNode) [Either String PlayerEvent]
+playerEventsArr :: EventID -> IOSLA (XIOState ()) (NTree XNode) (Either String [PlayerEvent])
 playerEventsArr eventid = proc html -> do
   players <- listA $ playerEventsArr' eventid Home -< html
   players' <- listA $ playerEventsArr' eventid Away -< html
-  returnA -< (players ++ players')
+  returnA -< sequenceA (players ++ players')
 
 readStatsLine :: EventID -> Team -> [String] -> Either String PlayerEvent
 readStatsLine eventid team (jumper:player:xs) = case map toMaybeInt xs of
@@ -60,8 +59,10 @@ readStatsLine eventid team (jumper:player:xs) = case map toMaybeInt xs of
                  | otherwise = Nothing
 readStatsLine _ _ _ = Left "stats line less than 3 elements long"
 
-readPlayerEventsFromFile :: EventID -> String -> IO [Either String PlayerEvent]
-readPlayerEventsFromFile eventid html = do
-  fmap concat $ runX $
-    readDocument [withWarnings no, withParseHTML yes, withRemoveWS yes] html
+readPlayerEventsFromHtml :: EventID -> String -> IO (Either String [PlayerEvent])
+readPlayerEventsFromHtml eventid html = do
+  [events] <- runX $
+    constA html
+    >>> readFromDocument [withWarnings no, withParseHTML yes, withRemoveWS yes]
     >>> playerEventsArr eventid
+  return events
