@@ -57,8 +57,6 @@ instance ToField LocalTime where
   toField x =  B8.pack $ show x
 instance ToField ScoreType where
   toField x =  B8.pack $ show x
-instance ToField Alignment where
-  toField x =  B8.pack $ show x
 instance FromField LocalTime where
   parseField x =  pure . read . B8.unpack $ x
 instance FromField ScoreType where
@@ -66,10 +64,6 @@ instance FromField ScoreType where
     "Behind" -> pure Behind
     "RushedBehind" -> pure RushedBehind
     "Goal" -> pure Goal
-instance FromField Alignment where
-  parseField x =  case B8.unpack x of
-    "Home" -> pure Home
-    "Away" -> pure Away
 
 instance ToNamedRecord ScoreEvent
 instance FromNamedRecord ScoreEvent
@@ -88,13 +82,12 @@ readScoreLine xs = case head xs of
   _ ->  readScoreLine' Home $ xs
   where
    readScoreLine' align xs@(description:t':_) =
-      let t = readTime t'
-      in
-        if "Rushed" `isInfixOf` description
-          then Right (align, t, RushedBehind, Nothing)
-          else case reverse . words $ description of
-                "behind":name -> Right (align, t, Behind, Just $ unwords name)
-                "goal":name -> Right (align, t, Goal, Just $ unwords name)
+      let clock = readTime t'
+      in if "Rushed" `isInfixOf` description
+         then Right (align, clock, RushedBehind, Nothing)
+         else case reverse . words $ description of
+                "behind":name -> Right (align, clock, Behind, Just $ unwords name)
+                "goal":name -> Right (align, clock, Goal, Just $ unwords name)
                 _ -> Left $ "Unexpected goal type in: " ++ (unwords xs)
    readScoreLine' _ xs = Left $ "couldnt parse " ++ (unwords xs)
 
