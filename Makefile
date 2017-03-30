@@ -1,7 +1,7 @@
 .PHONY: all
 all:
-	stack build && stack exec afltables
+	stack build
 
-.PHONY: clean
-clean:
-	rm -f *.out *.err core.*
+.PHONY: csvs
+csvs:
+	stack exec scrape
